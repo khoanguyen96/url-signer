@@ -4,7 +4,8 @@ namespace spec\Spatie\UrlSigner;
 
 use DateTime;
 use DateTimeZone;
-use League\Url\UrlImmutable;
+use League\Uri\Components\Query;
+use League\Uri\Uri;
 use PhpSpec\ObjectBehavior;
 use Spatie\UrlSigner\Exceptions\InvalidExpiration;
 use Spatie\UrlSigner\Exceptions\InvalidSignatureKey;
@@ -61,7 +62,7 @@ class MD5UrlSignerSpec extends ObjectBehavior
 
     public function it_can_sign_a_valid_signed_url_that_expires_at_a_certain_time()
     {
-        $url = 'http://myapp.com';
+        $url = 'http://myapp.com/';
         $expiration = DateTime::createFromFormat('d/m/Y H:i:s', '10/08/2115 18:15:44',
             new DateTimeZone('Europe/Brussels'));
 
@@ -148,26 +149,29 @@ class MD5UrlSignerSpec extends ObjectBehavior
             },
 
             'haveExpiration' => function ($subject, $expiration, $expirationParameter = 'expires') {
-                $url = UrlImmutable::createFromUrl($subject);
+                $uri = Uri::createFromString($subject);
+                $query = new Query($uri->getQuery());
 
-                return $url->getQuery()[$expirationParameter] === $expiration;
+                return $query->getPair($expirationParameter) === $expiration;
             },
 
             // Since some expiration timestamps are created internally, we can't match the exact time. We can however
             // safely assume that the signd expiration is correct if it's within a 5 minute interval of the
             // expected result.
             'haveExpirationAround' => function ($subject, $expiration, $expirationParameter = 'expires') {
-                $url = UrlImmutable::createFromUrl($subject);
+                $uri = Uri::createFromString($subject);
+                $query = new Query($uri->getQuery());
 
                 return
-                    $url->getQuery()[$expirationParameter] < $expiration + 60 * 5 &&
-                    $url->getQuery()[$expirationParameter] > $expiration - 60 * 5;
+                    $query->getPair($expirationParameter) < $expiration + 60 * 5 &&
+                    $query->getPair($expirationParameter) > $expiration - 60 * 5;
             },
 
             'haveSignature' => function ($subject, $signature, $signatureQueryParameter = 'signature') {
-                $url = UrlImmutable::createFromUrl($subject);
+                $uri = Uri::createFromString($subject);
+                $query = new Query($uri->getQuery());
 
-                return $url->getQuery()[$signatureQueryParameter] === $signature;
+                return $query->getPair($signatureQueryParameter) === $signature;
             },
         ];
     }
