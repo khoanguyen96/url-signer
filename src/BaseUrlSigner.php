@@ -3,8 +3,9 @@
 namespace Spatie\UrlSigner;
 
 use DateTime;
-use League\Url\Components\QueryInterface;
-use League\Url\UrlImmutable;
+use League\Uri\Uri;
+use League\Uri\Components\Query;
+use League\Uri\QueryBuilder;
 use Spatie\UrlSigner\Exceptions\InvalidExpiration;
 use Spatie\UrlSigner\Exceptions\InvalidSignatureKey;
 
@@ -49,71 +50,76 @@ abstract class BaseUrlSigner implements UrlSigner
         $this->signatureParameter = $signatureParameter;
     }
 
+    abstract protected function createSignature($uri, $expiration);
+
     /**
-     * Get a secure URL to a controller action.
+     * Get a secure URI to a controller action.
      *
-     * @param string        $url
+     * @param string        $uri
      * @param \DateTime|int $expiration
-     *
+     * @throws InvalidExpiration
      * @return string
      */
-    public function sign($url, $expiration)
+    public function sign($uri, $expiration)
     {
-        $url = UrlImmutable::createFromUrl($url);
+        $uri = Uri::createFromString($uri);
 
         $expiration = $this->getExpirationTimestamp($expiration);
-        $signature = $this->createSignature((string) $url, $expiration);
+        $signature = $this->createSignature((string) $uri, $expiration);
 
-        return (string) $this->signUrl($url, $expiration, $signature);
+        return (string) $this->signUri($uri, $expiration, $signature);
     }
 
     /**
-     * Add expiration and signature query parameters to an url.
+     * Add expiration and signature query parameters to an uri.
      *
-     * @param \League\Url\UrlImmutable $url
+     * @param \League\Uri\Uri $url
      * @param string                   $expiration
      * @param string                   $signature
      *
-     * @return \League\Url\UrlImmutable
+     * @return \League\Uri\Uri
      */
-    protected function signUrl(UrlImmutable $url, $expiration, $signature)
+    protected function signUri(Uri $uri, $expiration, $signature)
     {
-        $query = $url->getQuery();
+        $builder = new QueryBuilder();
+        $query = new Query($uri->getQuery());
 
-        $query->modify([
+        $signed = $builder->build([
             $this->expiresParameter   => $expiration,
             $this->signatureParameter => $signature,
         ]);
 
-        $urlSigner = $url->setQuery($query);
+        $query = $query->merge($signed);
+
+        $urlSigner = $uri->withQuery((string) $query);
 
         return $urlSigner;
     }
 
     /**
-     * Validate a signed url.
+     * Validate a signed uri.
      *
-     * @param string $url
+     * @param string $uri
      *
      * @return bool
      */
-    public function validate($url)
+    public function validate($uri)
     {
-        $url = UrlImmutable::createFromUrl($url);
+        $uri = Uri::createFromString($uri);
 
-        $query = $url->getQuery();
+        $query = new Query($uri->getQuery());
 
         if ($this->isMissingAQueryParameter($query)) {
             return false;
         }
 
-        $expiration = $query[$this->expiresParameter];
+        $expiration = $query->getPair($this->expiresParameter);
 
         if (!$this->isFuture($expiration)) {
             return false;
         }
 
-        if (!$this->hasValidSignature($url)) {
+        if (!$this->hasValidSignature($uri)) {
             return false;
         }
 
@@ -123,17 +129,19 @@ abstract class BaseUrlSigner implements UrlSigner
     /**
      * Check if a query is missing a necessary parameter.
      *
-     * @param \League\Url\Components\QueryInterface $query
+     * @param \League\Uri\Components\Query $query
      *
      * @return bool
      */
-    protected function isMissingAQueryParameter(QueryInterface $query)
+    protected function isMissingAQueryParameter(Query $query)
     {
-        if (!isset($query[$this->expiresParameter])) {
+        $pairs = $query->getPairs();
+
+        if (!isset($pairs[$this->expiresParameter])) {
             return true;
         }
 
-        if (!isset($query[$this->signatureParameter])) {
+        if (!isset($pairs[$this->signatureParameter])) {
             return true;
         }
 
@@ -155,22 +163,22 @@ abstract class BaseUrlSigner implements UrlSigner
     /**
      * Retrieve the intended URL by stripping off the UrlSigner specific parameters.
      *
-     * @param \League\Url\UrlImmutable $url
+     * @param \League\Uri\Uri $uri
      *
-     * @return \League\Url\UrlImmutable
+     * @return \League\Uri\Uri $uri
      */
-    protected function getIntendedUrl(UrlImmutable $url)
+    protected function getIntendedUrl(Uri $uri)
     {
-        $intendedQuery = $url->getQuery();
+        $query = new Query($uri->getQuery());
 
-        $intendedQuery->modify([
-            $this->expiresParameter   => null,
-            $this->signatureParameter => null,
+        $intendedQuery = $query->withoutPairs([
+            $this->expiresParameter,
+            $this->signatureParameter,
         ]);
 
-        $intendedUrl = $url->setQuery($intendedQuery);
+        $intendedUri = $uri->withQuery((string) $intendedQuery);
 
-        return $intendedUrl;
+        return $intendedUri;
     }
 
     /**
@@ -204,18 +212,18 @@ abstract class BaseUrlSigner implements UrlSigner
     /**
      * Determine if the url has a forged signature.
      *
-     * @param \League\Url\UrlImmutable $url
+     * @param \League\Uri\Uri $uri
      *
      * @return bool
      */
-    protected function hasValidSignature(UrlImmutable $url)
+    protected function hasValidSignature(Uri $uri)
     {
-        $query = $url->getQuery();
+        $query = new Query($uri->getQuery());
 
-        $expiration = $query[$this->expiresParameter];
-        $providedSignature = $query[$this->signatureParameter];
+        $expiration = $query->getPair($this->expiresParameter);
+        $providedSignature = $query->getPair($this->signatureParameter);
 
-        $intendedUrl = $this->getIntendedUrl($url);
+        $intendedUrl = $this->getIntendedUrl($uri);
 
         $validSignature = $this->createSignature($intendedUrl, $expiration);
 
